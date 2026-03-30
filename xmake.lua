@@ -11,8 +11,6 @@ if is_mode("coverage") then
     add_ldflags("--coverage")
 end
 
-add_repositories("local-repo build")
-
 add_requires("gtest")
 add_requires("asio")
 add_requires("pybind11")

@@ -62,7 +62,15 @@ int SkipList::random_level() {
   // ? - 确保层数分布为：第1层100%，第2层50%，第3层25%，以此类推
   // ? - 层数范围限制在[1, max_level]之间，避免浪费内存
   // TODO: Lab1.1 任务：插入时随机为这一次操作确定其最高连接的链表层数
-  return 0;
+  int level = 1;
+  while(level<max_level){
+    int coin=dis_01(gen);
+    if(coin==0){
+      break;
+    }
+    level+=1;
+  }
+  return level;
 }
 
 // 插入或更新键值对
@@ -76,6 +84,33 @@ void SkipList::put(const std::string &key, const std::string &value,
   // ? tranc_id 为事务id, 直接将其传递到 SkipListNode 的构造函数中即可
   // ? 若key存在且tranc_id相同, 仅更新value; 否则插入新节点
   // ? 注意维护 size_bytes
+   auto cur_node=head;
+   int level=current_level-1;
+   std::vector<std::shared_ptr<SkipListNode>> update(max_level,head);
+  while(level>=0){
+    while(cur_node->forward_[level]&&(cur_node->forward_[level]->key_<key||(cur_node->forward_[level]->key_==key&&cur_node->forward_[level]->tranc_id_>tranc_id))){ // 不断向右侧靠去
+      cur_node=cur_node->forward_[level];
+    }
+    update[level]=cur_node;
+    level--;
+  }
+  if(cur_node->forward_[0]!=nullptr&&cur_node->forward_[0]->key_==key&&cur_node->forward_[0]->tranc_id_==tranc_id){
+    size_bytes = size_bytes - cur_node->forward_[0]->value_.size() + value.size();
+    cur_node->forward_[0]->value_=value;
+    return;
+  }
+  int new_level=random_level();
+  auto new_node=std::make_shared<SkipListNode>(key,value,new_level,tranc_id);
+  for(int i=0;i<new_level;i++){
+    new_node->forward_[i]=update[i]->forward_[i];
+    update[i]->forward_[i]=new_node;
+    new_node->set_backward(i,update[i]);
+    if(new_node->forward_[i]!=nullptr){
+    new_node->forward_[i]->set_backward(i,new_node);
+    }
+  }
+  if(new_level>current_level) current_level=new_level;
+  size_bytes+=key.size()+value.size()+sizeof(uint64_t);
 }
 
 // 查找键值对
@@ -85,7 +120,16 @@ SkipListIterator SkipList::get(const std::string &key, uint64_t tranc_id) {
   // TODO: Lab1.1 任务：实现查找键值对
   // ? 从最高层开始向下查找, 最终在底层确认 key 是否存在
   // ? 若 tranc_id == 0, 直接比较 key 返回; 否则需满足事务可见性 (tranc_id_ <= tranc_id)
+  int level=current_level-1;
+  auto cur_node=head;
+  while(level>=0){
+    while(cur_node->forward_[level]&&cur_node->forward_[level]<cur_node){
+      cur_node=cur_node->forward_[level];
+    }
+    level--;
+  }
   // TODO: 完成查找后还需要额外实现SkipListIterator中的TODO部分(Lab1.2)
+
   return SkipListIterator{};
 }
 
