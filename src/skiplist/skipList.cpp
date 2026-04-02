@@ -12,24 +12,34 @@ namespace tiny_lsm {
 BaseIterator &SkipListIterator::operator++() {
   // TODO: Lab1.2 任务：实现SkipListIterator的++操作符
   // ? current 是当前节点指针, forward_[0] 是最底层链表的下一个节点
+  if(current){
+    current=current->forward_[0];
+  }
   return *this;
 }
 
 bool SkipListIterator::operator==(const BaseIterator &other) const {
   // TODO: Lab1.2 任务：实现SkipListIterator的==操作符
   // ? 需要先通过 get_type() 判断类型再做 dynamic_cast
-  return false;
+  if(other.get_type()!=IteratorType::SkipListIterator){
+    return false;
+  }
+  const auto &other_iter=dynamic_cast<const SkipListIterator &>(other);
+  return current==other_iter.current;
 }
 
 bool SkipListIterator::operator!=(const BaseIterator &other) const {
   // TODO: Lab1.2 任务：实现SkipListIterator的!=操作符
-  return true;
+  return !(*this==other);
 }
 
 SkipListIterator::value_type SkipListIterator::operator*() const {
   // TODO: Lab1.2 任务：实现SkipListIterator的*操作符
   // ? 若 current 为空需抛出异常
-  return {"", ""};
+  if(current==nullptr){
+    throw std::out_of_range("SkipListIterator is invalid!!");
+  }
+  return {get_key(), get_value()};
 }
 
 IteratorType SkipListIterator::get_type() const {
@@ -120,17 +130,35 @@ SkipListIterator SkipList::get(const std::string &key, uint64_t tranc_id) {
   // TODO: Lab1.1 任务：实现查找键值对
   // ? 从最高层开始向下查找, 最终在底层确认 key 是否存在
   // ? 若 tranc_id == 0, 直接比较 key 返回; 否则需满足事务可见性 (tranc_id_ <= tranc_id)
+ 
   int level=current_level-1;
   auto cur_node=head;
   while(level>=0){
-    while(cur_node->forward_[level]&&cur_node->forward_[level]<cur_node){
+    while(cur_node->forward_[level]&&cur_node->forward_[level]->key_<key){
       cur_node=cur_node->forward_[level];
     }
     level--;
   }
+  auto next_node=cur_node->forward_[0];
+  if(next_node==nullptr||next_node->key_!=key){
+    return SkipListIterator{};
+  }
+  if(tranc_id==0){ // 如果不开事务,直接返回最新版本
+    return SkipListIterator{next_node};
+  }
+
+  //否则顺着同key的版本链往后找第一个可见的版本
+  while(next_node&&next_node->key_==key){
+    if(next_node->tranc_id_<=tranc_id){ // 表示此时这个node对于事务来说是可见的
+      return SkipListIterator(next_node);
+    }
+    next_node=next_node->forward_[0];
+  }
+
+  
   // TODO: 完成查找后还需要额外实现SkipListIterator中的TODO部分(Lab1.2)
 
-  return SkipListIterator{};
+  return SkipListIterator{}; // 不可见则返回空
 }
 
 // 删除键值对
@@ -140,6 +168,45 @@ void SkipList::remove(const std::string &key) {
   // TODO: Lab1.1 任务：实现删除键值对
   // ? 从最高层开始查找目标节点并更新各层指针
   // ? 注意同时维护 backward_ 指针和 size_bytes
+  std::vector<std::shared_ptr<SkipListNode>> update(max_level,head);
+  auto cur_node=head;
+  int level=current_level-1;
+  //先找到每一层的前驱节点
+  while(level>=0){
+    while(cur_node->forward_[level]&&cur_node->forward_[level]->key_<key){
+      cur_node=cur_node->forward_[level];
+    }
+    update[level]=cur_node;
+    level--;
+  }
+
+  auto target=cur_node->forward_[0];
+
+  if(target==nullptr||target->key_!=key){
+    //如果不存在 ,直接return;
+    return;
+  }
+
+  //删除这个key的所有版本;
+  while(target&&target->key_==key){
+    auto next_node=target->forward_[0];
+    for(int i=0;i<target->forward_.size();i++){
+      if(update[i]->forward_[i]==target){
+        update[i]->forward_[i]=target->forward_[i];
+      }
+      if(target->forward_[i]){
+        target->forward_[i]->set_backward(i,update[i]);
+      }
+    }
+    size_bytes-=target->key_.size()+target->value_.size()+sizeof(uint64_t);
+    target=next_node;
+  }
+
+  //如果最高层已经空了,降低当前有效层数
+  while(current_level>1&&head->forward_[current_level-1]==nullptr){
+    current_level--;
+  }
+  
 }
 
 // 刷盘时可以直接遍历最底层链表
