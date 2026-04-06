@@ -352,15 +352,26 @@ HeapIterator MemTable::iters_preffix(const std::string &preffix,
   // ? 过滤事务可见性, 同 key 只保留最新版本
   std::shared_lock<std::shared_mutex> slock1(cur_mtx);
   std::shared_lock<std::shared_mutex> slock2(frozen_mtx);
-
   std::vector<SearchItem> item_vec;
   int table_idx=0;
+  auto collect_from_table=[&](const std::shared_ptr<SkipList>& table,int idx){
+    auto it=table->begin_preffix(preffix);
+    auto end_it=table->end_preffix(preffix);
 
+    while(!(it==end_it)){
+      if(tranc_id==0||it.get_tranc_id()<=tranc_id){
+        item_vec.emplace_back(it.get_key(),it.get_value(),idx,0,it.get_tranc_id());
+      }
+      ++it;
+    }
+  };
+  collect_from_table(current_table,table_idx++);
+  for(const auto & table:frozen_tables){
+    collect_from_table(table,table_idx++);
+  }
+
+  return HeapIterator(item_vec,tranc_id);
   
-
-
-
-  return {};
 }
 
 std::optional<std::pair<HeapIterator, HeapIterator>>
@@ -370,6 +381,35 @@ MemTable::iters_monotony_predicate(
   // ? 加读锁, 对所有表调用 iters_monotony_predicate 获取结果
   // ? 过滤事务可见性, 同 key 只保留最新版本
   // ? 若结果为空返回 nullopt; 否则返回 make_pair(HeapIterator(item_vec, tranc_id, true), HeapIterator{})
-  return std::nullopt;
+  std::shared_lock<std::shared_mutex> slock1(cur_mtx);
+  std::shared_lock<std::shared_mutex> slock2(frozen_mtx);
+
+  std::vector<SearchItem> item_vec;
+  int table_idx=0;
+
+  auto collect_from_table=[&](const std::shared_ptr<SkipList>& table,int idx){
+    auto range_opt=table->iters_monotony_predicate(predicate);
+    if(!range_opt.has_value()){
+      return;
+    }
+    auto [it_begin,it_end]=range_opt.value();
+    while(!(it_begin==it_end)){
+      if(tranc_id==0||it_begin.get_tranc_id()<=tranc_id){
+        item_vec.emplace_back(it_begin.get_key(),it_begin.get_value(),idx,0,it_begin.get_tranc_id());
+      }
+      ++it_begin;
+    }
+  };
+  
+  collect_from_table(current_table,table_idx++);
+  for(const auto & table:frozen_tables){
+    collect_from_table(table,table_idx++);
+  }
+  if(item_vec.empty()){
+    return std::nullopt;
+  }
+
+
+  return std::make_pair(HeapIterator(item_vec,tranc_id),HeapIterator{});
 }
 } // namespace tiny_lsm
