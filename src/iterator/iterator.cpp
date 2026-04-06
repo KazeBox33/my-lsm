@@ -50,11 +50,11 @@ HeapIterator::HeapIterator(std::vector<SearchItem> item_vec,
     items.push(item);
   }
 
-  while (!top_value_legal()) {
+  while (!top_value_legal()) { // 表示,只要当前堆顶不是一个合法可返回的值,就继续清理
     // 1. 先跳过事务 id 不可见的部分
     skip_by_tranc_id();
 
-    if (!skip_delete_) {
+    if (!skip_delete_) { // skip_delete表示是否需要跳过删除标记,  不需要就进入下一轮
       continue;
     }
     // 2. 跳过标记为删除的元素

@@ -312,7 +312,31 @@ HeapIterator MemTable::begin(uint64_t tranc_id) {
   // ? 每个 item 包含 key, value, table_idx, 0, tranc_id
   // ? 过滤 tranc_id 不可见的记录 (tranc_id != 0 && iter.get_tranc_id() > tranc_id)
   // ? 返回 HeapIterator(item_vec, tranc_id)
-  return {};
+  std::shared_lock<std::shared_mutex> slock1(cur_mtx);
+  std::shared_lock<std::shared_mutex> slock2(frozen_mtx);
+
+  std::vector<SearchItem> item_vec;
+  int table_idx=0;
+
+  for(auto it=current_table->begin();!it.is_end();++it){
+    if(tranc_id!=0&&it.get_tranc_id()>tranc_id){
+      continue;
+    }
+    item_vec.emplace_back(it.get_key(),it.get_value(),table_idx,0,it.get_tranc_id());
+  }
+
+  table_idx++;
+  for(const auto & table:frozen_tables){
+    for(auto it=table->begin();!it.is_end();++it){
+      if(tranc_id!=0&&it.get_tranc_id()>tranc_id){
+        continue;
+      }
+      item_vec.emplace_back(it.get_key(),it.get_value(),table_idx,0,it.get_tranc_id());
+    }
+    table_idx++;
+  }
+
+  return HeapIterator(item_vec,tranc_id); 
 }
 
 HeapIterator MemTable::end() {
@@ -326,6 +350,16 @@ HeapIterator MemTable::iters_preffix(const std::string &preffix,
   // TODO: Lab2.3 MemTable 的前缀迭代器
   // ? 加读锁, 对所有表调用 begin_preffix/end_preffix 遍历前缀范围
   // ? 过滤事务可见性, 同 key 只保留最新版本
+  std::shared_lock<std::shared_mutex> slock1(cur_mtx);
+  std::shared_lock<std::shared_mutex> slock2(frozen_mtx);
+
+  std::vector<SearchItem> item_vec;
+  int table_idx=0;
+
+  
+
+
+
   return {};
 }
 
