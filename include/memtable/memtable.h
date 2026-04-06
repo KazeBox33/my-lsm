@@ -72,8 +72,8 @@ public:
   HeapIterator end();
 
 private:
-  std::shared_ptr<SkipList> current_table;
-  std::list<std::shared_ptr<SkipList>> frozen_tables;
+  std::shared_ptr<SkipList> current_table; // 底层实现的跳表
+  std::list<std::shared_ptr<SkipList>> frozen_tables; // 冻结的表
   size_t frozen_bytes;
   std::shared_mutex frozen_mtx; // 冻结表的锁
   std::shared_mutex cur_mtx;    // 活跃表的锁

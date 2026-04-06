@@ -29,6 +29,8 @@ void MemTable::put_(const std::string &key, const std::string &value,
                     uint64_t tranc_id) {
   // TODO: Lab2.1 无锁版本的 put
   // ? 直接调用 current_table 的 put 方法
+  current_table->put(key,value,tranc_id);
+  
 }
 
 void MemTable::put(const std::string &key, const std::string &value,
@@ -36,6 +38,14 @@ void MemTable::put(const std::string &key, const std::string &value,
   // TODO: Lab2.1 有锁版本的 put
   // ? 加 cur_mtx 写锁后调用 put_()
   // ? 若 current_table 超过 LsmPerMemSizeLimit, 还需加 frozen_mtx 写锁并调用 frozen_cur_table_()
+  std::unique_lock<std::shared_mutex> lock(cur_mtx);
+  current_table->put(key,value,tranc_id);
+
+  if(current_table->get_size()>TomlConfig::getInstance().getLsmPerMemSizeLimit()){
+    //如果超出内存限制了
+    std::unique_lock<std::shared_mutex> frozen_lock(frozen_mtx);
+    frozen_cur_table_();
+  }
 }
 
 void MemTable::put_batch(
@@ -44,13 +54,25 @@ void MemTable::put_batch(
   // TODO: Lab2.1 有锁版本的 put_batch
   // ? 加 cur_mtx 写锁后遍历 kvs 依次调用 put_()
   // ? 结束后若超限则冻结当前表
+  std::unique_lock<std::shared_mutex> lock(cur_mtx);
+
+  for(const auto &[key,value]: kvs){
+    put_(key,value,tranc_id);
+  }
+
+  if(current_table->get_size()>TomlConfig::getInstance().getLsmPerMemSizeLimit()){
+    std::unique_lock<std::shared_mutex> frozen_lock(frozen_mtx);
+    frozen_cur_table_(); // 冻结当前表
+  }
+
+
 }
 
 SkipListIterator MemTable::cur_get_(const std::string &key, uint64_t tranc_id) {
   // 检查当前活跃的memtable
   // TODO: Lab2.1 从活跃跳表中查询
   // ? 调用 current_table->get(), 找到则返回; 未找到则返回空迭代器
-  return SkipListIterator{};
+  return current_table->get(key,tranc_id);
 }
 
 SkipListIterator MemTable::frozen_get_(const std::string &key,
@@ -58,19 +80,42 @@ SkipListIterator MemTable::frozen_get_(const std::string &key,
   // TODO: Lab2.1 从冻结跳表中查询
   // ? 遍历 frozen_tables (注意顺序：越靠前越新), 找到即返回
   // ? tranc_id 直接传递到 get() 即可
+  for(const auto & table:frozen_tables){
+    auto it=table->get(key,tranc_id);
+    if(it.is_valid()){
+      return it;
+    }
+  }
+  
   return SkipListIterator{};
 }
 
 SkipListIterator MemTable::get(const std::string &key, uint64_t tranc_id) {
   // TODO: Lab2.1 查询, 建议复用 cur_get_ 和 frozen_get_
   // ? 先加 cur_mtx 读锁查活跃表, 未命中则释放锁后加 frozen_mtx 读锁查冻结表
-  return SkipListIterator{};
+  //有锁版本
+  {  // cur_table加锁
+  std::shared_lock<std::shared_mutex> slock(cur_mtx);
+  auto cur_res=cur_get_(key,tranc_id);
+  if(cur_res.is_valid()){
+    return cur_res;
+  }
+  }
+  { // frozen_table 加锁
+    std::shared_lock<std::shared_mutex> slock(frozen_mtx);
+    return frozen_get_(key,tranc_id);
+  }
 }
 
 SkipListIterator MemTable::get_(const std::string &key, uint64_t tranc_id) {
   // TODO: Lab2.1 查询, 无锁版本
   // ? 直接调用 cur_get_ 和 frozen_get_
-  return SkipListIterator{};
+  auto cur_res=cur_get_(key, tranc_id);
+  if(cur_res.is_valid()){
+    return cur_res;
+  }
+  return frozen_get_(key,tranc_id);
+  
 }
 
 std::vector<
@@ -129,12 +174,20 @@ MemTable::get_batch(const std::vector<std::string> &keys, uint64_t tranc_id) {
 void MemTable::remove_(const std::string &key, uint64_t tranc_id) {
   // TODO: Lab2.1 无锁版本的remove
   // ? 在 LSM 中, 删除操作是写入空值, 调用 current_table->put(key, "", tranc_id)
+  current_table->put(key,"",tranc_id);
 }
 
 void MemTable::remove(const std::string &key, uint64_t tranc_id) {
   // TODO: Lab2.1 有锁版本的remove
   // ? 加 cur_mtx 写锁后调用 remove_()
   // ? 若超限则冻结当前表
+  std::unique_lock<std::shared_mutex> lock(cur_mtx);
+  remove_(key,tranc_id);
+
+  if(current_table->get_size()>TomlConfig::getInstance().getLsmPerMemSizeLimit()){
+    std::unique_lock<std::shared_mutex> frozen_lock(frozen_mtx);
+    frozen_cur_table_();
+  }
 }
 
 void MemTable::remove_batch(const std::vector<std::string> &keys,
@@ -142,6 +195,17 @@ void MemTable::remove_batch(const std::vector<std::string> &keys,
   // TODO: Lab2.1 有锁版本的remove_batch
   // ? 加 cur_mtx 写锁后遍历 keys 依次调用 remove_()
   // ? 结束后若超限则冻结当前表
+  std::unique_lock<std::shared_mutex> lock(cur_mtx);
+  
+  for(const auto &key: keys){
+    remove_(key,tranc_id);
+  }
+
+  if(current_table->get_size()>TomlConfig::getInstance().getLsmPerMemSizeLimit()){
+    std::unique_lock<std::shared_mutex> frozen_lock(frozen_mtx);
+    frozen_cur_table_();
+  }
+  
 }
 
 void MemTable::clear() {
@@ -209,11 +273,20 @@ void MemTable::frozen_cur_table_() {
   // TODO: Lab2.1 冻结活跃表（无锁版本）
   // ? 将 current_table 移入 frozen_tables 头部, 并更新 frozen_bytes
   // ? 创建新的空 SkipList 作为 current_table
+    if(current_table->get_size()==0){
+    return;
+  }
+  frozen_tables.push_front(current_table);
+  frozen_bytes+=current_table->get_size();
+  current_table=std::make_shared<SkipList>();
 }
 
 void MemTable::frozen_cur_table() {
   // TODO: Lab2.1 冻结活跃表（有锁版本）
   // ? 加 cur_mtx 和 frozen_mtx 写锁后调用 frozen_cur_table_()
+  std::unique_lock<std::shared_mutex> lock1(cur_mtx);
+  std::unique_lock<std::shared_mutex> lock2(frozen_mtx);
+  frozen_cur_table_();
 }
 
 size_t MemTable::get_cur_size() {

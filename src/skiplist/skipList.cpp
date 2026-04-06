@@ -252,14 +252,37 @@ SkipListIterator SkipList::end() {
 SkipListIterator SkipList::begin_preffix(const std::string &preffix) {
   // TODO: Lab1.3 任务：实现前缀查询的起始位置
   // ? 从最高层开始查找, 找到第一个 key >= preffix 的节点
-  return SkipListIterator{};
+  auto cur_node=head;
+  int level=current_level-1;
+
+  while(level>=0){
+    while(cur_node->forward_[level]&&cur_node->forward_[level]->key_<preffix){
+      cur_node=cur_node->forward_[level];
+    }
+    level--;
+  }
+
+  if(cur_node->forward_[0]){
+    return SkipListIterator(cur_node->forward_[0]);
+  }
+  return end();
 }
 
 // 找到前缀的终结位置
 SkipListIterator SkipList::end_preffix(const std::string &prefix) {
   // TODO: Lab1.3 任务：实现前缀查询的终结位置
   // ? 找到第一个 key 不以 prefix 开头的节点作为终结位置
-  return SkipListIterator{};
+  auto it=begin_preffix(prefix);
+
+  while(it!=end()){
+    const auto key=it.get_key();
+    if(key.rfind(prefix,0)!=0){
+      return it;
+    }
+    ++it;
+  }
+  return end();
+  
 }
 
 // ? 这里单调谓词的含义是, 整个数据库只会有一段连续区间满足此谓词
@@ -279,7 +302,68 @@ SkipList::iters_monotony_predicate(
   // ? 分两步: 1. 利用多层跳表快速找到谓词满足区间内的一个节点
   // ?         2. 分别向前/向后扩展, 利用 backward_ 和 forward_ 确定区间边界
   // ? 注意: 向前查找时需要利用 backward_ 指针从当前节点的最高层开始回溯
-  return std::nullopt;
+  // auto node=head->forward_[0];
+
+  // //先跳过所有还在目标区间左边的节点
+  // while(node&&predicate(node->key_)>0){
+  //   node=node->forward_[0];
+  // }
+
+  // if(!node||predicate(node->key_)!=0){
+  //   return std::nullopt;
+  // }
+  // auto begin_node=node;
+
+  // while(node&&predicate(node->key_)==0){
+  //   node=node->forward_[0];
+  // }
+
+  // auto end_node=node;
+
+  //  return std::make_pair(SkipListIterator(begin_node),
+  //                       SkipListIterator(end_node));
+  
+  auto cur=head;
+  std::shared_ptr<SkipListNode> hit=nullptr;
+  
+  //先利用多层跳表快速找到一个命中节点;
+
+  for(int level=current_level-1;level>=0&&!hit;--level){
+    while(cur->forward_[level]){
+      auto next=cur->forward_[level];
+      int res=predicate(next->key_);
+
+      if(res>0){
+        cur=next;
+      }else if(res==0){
+        hit=next;
+        break;
+      }else{
+        break;  //进下层寻找
+      }
+    }
+  }
+
+  if(!hit){
+    return std::nullopt;
+  }
+
+  //第二步，在第0层向左找最左边界
+  auto begin_node=hit;
+  while(true){
+    auto prev=begin_node->backward_[0].lock();
+    if(!prev||prev->key_.empty()||predicate(prev->key_)!=0){
+      break;
+    }
+    begin_node=prev;
+  }
+
+  auto end_node=hit;
+  while(end_node&&predicate(end_node->key_)==0){
+    end_node=end_node->forward_[0];
+  }
+  return std::make_pair(SkipListIterator(begin_node),SkipListIterator(end_node));
+  
 }
 
 // ? 打印跳表, 你可以在出错时调用此函数进行调试
