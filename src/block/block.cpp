@@ -17,6 +17,34 @@ std::vector<uint8_t> Block::encode(bool with_hash) {
   // ? 格式: [data段] + [offsets数组, 每项uint16_t] + [元素个数 uint16_t]
   // ? 若 with_hash == true, 末尾额外追加 uint32_t 的 CRC 校验值
   // ? CRC 覆盖除自身之外的所有字节
+  std::vector<uint8_t> out;
+  const uint16_t num_entries=static_cast<uint16_t>(offsets.size());
+
+  size_t total_size=data.size()+offsets.size()*sizeof(uint16_t)+sizeof(uint16_t)+(with_hash?sizeof(uint32_t):0);
+  out.reserve(total_size);
+
+  out.insert(out.end(),data.begin(),data.end());
+
+  for(uint16_t off: offsets){
+    const uint8_t *p =reinterpret_cast<const uint8_t*>(&off);
+    out.insert(out.end(),p,p+sizeof(uint16_t));
+  }
+
+  //3 num_entries
+  { // 临时生命周期, 把p限制起来
+    const uint8_t *p = reinterpret_cast<const uint8_t*>(&num_entries);
+    out.insert(out.end(),p,p+sizeof(uint16_t));
+  }
+  
+    // 4) hash (optional), covers all previous bytes
+  if (with_hash) {
+    uint32_t hash = std::hash<std::string>{}(
+        std::string(reinterpret_cast<const char *>(out.data()), out.size()));
+    const uint8_t *p = reinterpret_cast<const uint8_t *>(&hash);
+    out.insert(out.end(), p, p + sizeof(uint32_t));
+  }
+
+
   return {};
 }
 

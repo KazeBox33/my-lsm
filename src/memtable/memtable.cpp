@@ -409,7 +409,7 @@ MemTable::iters_monotony_predicate(
     return std::nullopt;
   }
 
-
+  
   return std::make_pair(HeapIterator(item_vec,tranc_id),HeapIterator{});
 }
 } // namespace tiny_lsm
