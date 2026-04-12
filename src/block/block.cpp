@@ -45,7 +45,7 @@ std::vector<uint8_t> Block::encode(bool with_hash) {
   }
 
 
-  return {};
+  return out;
 }
 
 std::shared_ptr<Block> Block::decode(const std::vector<uint8_t> &encoded,
@@ -53,7 +53,59 @@ std::shared_ptr<Block> Block::decode(const std::vector<uint8_t> &encoded,
   // TODO: Lab 3.1 解码字节数组形成类实例
   // ? 从末尾读取元素个数, 若 with_hash 为 true 先校验 CRC
   // ? 然后依次读取 offsets 和 data 段
-  return nullptr;
+
+ //hash 为 uint32  num_entries 键值对数量为 uint16_t
+
+  if(encoded.size()<sizeof(uint16_t)+(with_hash?sizeof(uint32_t):0)){
+    throw std::runtime_error("Encoded block too small");
+  }
+
+  size_t total_size=encoded.size(); // 用来确定末尾位置
+  
+  // 1 verify hash if needed
+  if(with_hash){
+    if(total_size<sizeof(uint32_t)+sizeof(uint16_t)){
+      throw std::runtime_error("Encoded block too small for hash");
+    }
+    uint32_t stored_hash=0;
+    std::memcpy(&stored_hash,encoded.data()+total_size-sizeof(uint32_t),sizeof(uint32_t));
+    
+    uint32_t computed_hash=std::hash<std::string>{}(std::string(reinterpret_cast<const char *>(encoded.data()),total_size-sizeof(uint32_t)));
+    
+    if(stored_hash!=computed_hash){
+      throw std::runtime_error("block hash mismatch");
+    }
+    total_size -=sizeof(uint32_t);
+  }
+
+  // 2 read num_entries
+  if(total_size<sizeof(uint16_t)){
+    throw std::runtime_error("Encoded block too small for num_entries");
+  }
+  uint16_t num_entries=0;
+  std::memcpy(&num_entries,encoded.data()+total_size-sizeof(uint16_t),sizeof(uint16_t));
+
+ // 3 locate offsets section
+
+  size_t offsets_bytes=static_cast<size_t>(num_entries)*sizeof(uint16_t); // offsets占据的字节数
+  if(total_size<sizeof(uint16_t)+offsets_bytes){
+    throw std::runtime_error("Encoded block offsets size invalid");
+  }
+  size_t offsets_start=total_size-sizeof(uint16_t)-offsets_bytes;
+
+  // 4 data section is [0,offsets_start)
+  auto block =std::make_shared<Block>(encoded.size());
+  block->data.assign(encoded.begin(),encoded.begin()+offsets_start);
+
+  //5 parse offsets
+  block->offsets.resize(num_entries);
+  for(size_t i=0;i<num_entries;++i){
+    uint16_t off=0;
+    std::memcpy(&off,encoded.data()+offsets_start+i*sizeof(uint16_t),sizeof(uint16_t));
+    block->offsets[i]=off;
+  }
+
+  return block;
 }
 
 std::string Block::get_first_key() {
