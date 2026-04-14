@@ -143,20 +143,47 @@ bool Block::add_entry(const std::string &key, const std::string &value,
 std::string Block::get_key_at(size_t offset) const {
   // TODO: Lab 3.1 从指定偏移量获取entry的key
   // ? 读取 data[offset] 处的 uint16_t key_len, 再取后续 key_len 个字节
-  return "";
+
+
+  //  先从 data[offset] 读两个字节 得到key_len 再取接下来的key_len个字节作为key
+
+  uint16_t key_len=0;
+  std::memcpy(&key_len,data.data()+offset,sizeof(uint16_t));
+
+  return std::string(reinterpret_cast<const char*>(data.data()+offset+sizeof(uint16_t)),key_len);
 }
 
 // 从指定偏移量获取entry的value
 std::string Block::get_value_at(size_t offset) const {
   // TODO: Lab 3.1 从指定偏移量获取entry的value
   // ? 先跳过 key_len + key, 再读取 uint16_t value_len, 最后取 value
-  return "";
+  uint16_t key_len = 0;
+  std::memcpy(&key_len, data.data() + offset, sizeof(uint16_t));
+
+  size_t value_len_pos = offset + sizeof(uint16_t) + key_len;
+  uint16_t value_len = 0;
+  std::memcpy(&value_len, data.data() + value_len_pos, sizeof(uint16_t));
+
+  size_t value_pos = value_len_pos + sizeof(uint16_t);
+  return std::string(reinterpret_cast<const char *>(data.data() + value_pos),
+                     value_len);
 }
 
 uint64_t Block::get_tranc_id_at(size_t offset) const {
   // TODO: Lab 3.1 从指定偏移量获取entry的tranc_id
   // ? 先跳过 key 和 value, 读取末尾的 uint64_t tranc_id
-  return 0;
+  uint16_t key_len = 0;
+  std::memcpy(&key_len, data.data() + offset, sizeof(uint16_t));
+
+  size_t value_len_pos = offset + sizeof(uint16_t) + key_len;
+  uint16_t value_len = 0;
+  std::memcpy(&value_len, data.data() + value_len_pos, sizeof(uint16_t));
+
+  size_t tranc_id_pos =
+      value_len_pos + sizeof(uint16_t) + static_cast<size_t>(value_len);
+  uint64_t tranc_id = 0;
+  std::memcpy(&tranc_id, data.data() + tranc_id_pos, sizeof(uint64_t));
+  return tranc_id;
 }
 
 // 比较指定偏移量处的key与目标key
